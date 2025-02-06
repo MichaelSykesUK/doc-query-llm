@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Document Query Chat</title>
+
+  <!-- Favicon -->
+  <link rel="icon" href="dist/favicon.ico" type="image/x-icon" />
+
+  <!-- Styles -->
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="container">
+    <!-- Model Selector at the top right -->
+    <div class="model-selector">
+      <label for="model-select">Model:</label>
+      <span class="model-icon">M</span>
+      <select id="model-select" aria-label="Select Model">
+        <option value="llama3.1:8b" selected>llama3.1:8b</option>
+        <option value="llama3:8b">llama3:8b</option>
+        <option value="llama2:7b">llama2:7b</option>
+        <option value="gemma2:9b">gemma2:9b</option>
+        <option value="phi4:14b">phi4:14b</option>
+        <option value="mistral:7b">mistral:7b</option>
+        <option value="mistral-nemo:12b">mistral-nemo:12b</option>
+      </select>
+    </div>
+
+    <div class="chat-container">
+      <div class="query-area">
+        <textarea id="query" class="query-input" placeholder="Enter your query..."></textarea>
+        <button type="submit" id="submit-btn" class="send-button">Send</button>
+      </div>
+      <div id="response"></div>
+      <div id="loading" style="display: none;">Loading...</div>
+    </div>
+  </div>
+
+  <!-- JavaScript -->
+  <script src="dist/main.js"></script>
+</body>
+</html>
