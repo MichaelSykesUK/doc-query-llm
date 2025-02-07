@@ -3,42 +3,83 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Document Query Chat</title>
-
+  <title>Hummingbird</title>
   <!-- Favicon -->
-  <link rel="icon" href="dist/favicon.ico" type="image/x-icon" />
-
+  <link rel="icon" href="dist/robot_hummingbird.ico" type="image/x-icon" />
   <!-- Styles -->
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <div class="container">
-    <!-- Model Selector at the top right -->
-    <div class="model-selector">
-      <label for="model-select">Model:</label>
-      <span class="model-icon">M</span>
-      <select id="model-select" aria-label="Select Model">
-        <option value="llama3.1:8b" selected>llama3.1:8b</option>
-        <option value="llama3:8b">llama3:8b</option>
-        <option value="llama2:7b">llama2:7b</option>
-        <option value="gemma2:9b">gemma2:9b</option>
-        <option value="phi4:14b">phi4:14b</option>
-        <option value="mistral:7b">mistral:7b</option>
-        <option value="mistral-nemo:12b">mistral-nemo:12b</option>
-      </select>
+    <div class="header">
+      How can I help?
     </div>
 
-    <div class="chat-container">
-      <div class="query-area">
+    <!-- Chat Container: All conversation messages go here -->
+    <div class="chat-container" id="conversation">
+      <!-- Message pairs (user query + response) will be appended here -->
+    </div>
+
+    <!-- Query Area: Stays fixed at the bottom for new queries -->
+    <div class="query-area">
+      <div class="query-box">
         <textarea id="query" class="query-input" placeholder="Enter your query..."></textarea>
-        <button type="submit" id="submit-btn" class="send-button">Send</button>
+
+        <!-- Context Selector (Top Right) using the same method as the model selector -->
+        <div class="context-selector-container">
+          <button id="context-select" aria-haspopup="true" aria-expanded="false">
+            <div class="context-name">VA-1X</div>
+          </button>
+          <div class="context-dropdown">
+            <div class="context-option" data-context="VA-1X">VA-1X</div>
+            <div class="context-option" data-context="VX4">VX4</div>
+          </div>
+        </div>
+
+        <!-- Model Selector (Bottom Left) -->
+        <div class="model-selector-container">
+          <button id="model-select" aria-haspopup="true" aria-expanded="false">
+            <div class="model-name">llama3.1:8b</div>
+          </button>
+          <div class="model-dropdown">
+            <div class="model-option" data-model="llama3.1:8b">
+              <div class="model-name">llama3.1:8b</div>
+              <div class="model-description">Meta's newest model</div>
+            </div>
+            <div class="model-option" data-model="llama3:8b">
+              <div class="model-name">llama3:8b</div>
+              <div class="model-description">A strong inference model by Meta</div>
+            </div>
+            <div class="model-option" data-model="llama2:7b">
+              <div class="model-name">llama2:7b</div>
+              <div class="model-description">A very popular classic model from Meta</div>
+            </div>
+            <div class="model-option" data-model="gemma2:9b">
+              <div class="model-name">gemma2:9b</div>
+              <div class="model-description">An open source alternative to Google's Gemini</div>
+            </div>
+            <div class="model-option" data-model="phi4:14b">
+              <div class="model-name">phi4:14b</div>
+              <div class="model-description">Microsoft's take on an open‑source LLM</div>
+            </div>
+            <div class="model-option" data-model="mistral:7b">
+              <div class="model-name">mistral:7b</div>
+              <div class="model-description">European start‑up in the LLM space</div>
+            </div>
+            <div class="model-option" data-model="mistral-nemo:12b">
+              <div class="model-name">mistral-nemo:12b</div>
+              <div class="model-description">Developed by Mistral and Nvidia</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Submit Button (Bottom Right) -->
+        <button type="submit" id="submit-btn" class="send-button">→</button>
       </div>
-      <div id="response"></div>
-      <div id="loading" style="display: none;">Loading...</div>
     </div>
   </div>
 
-  <!-- JavaScript -->
+  <!-- Include the compiled TypeScript file -->
   <script src="dist/main.js"></script>
 </body>
 </html>

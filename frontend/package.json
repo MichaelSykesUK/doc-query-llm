@@ -1,0 +1,20 @@
+{
+  "name": "document-query-app-frontend",
+  "version": "1.0.0",
+  "description": "Frontend for the document query LLM app",
+  "main": "index.js",
+  "scripts": {
+    "start": "http-server",
+    "build": "npx tsc",
+    "dev": "npx tsc --watch",
+    "serve": "npm run start"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "http-server": "^14.1.1",
+    "typescript": "^5.7.3"
+  }
+}

@@ -169,3 +169,13 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+
+
+**docs
+**docs2
+**node_modules
+/.vscode
+/__pycache__
+old
+**output

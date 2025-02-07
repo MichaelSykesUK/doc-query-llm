@@ -6,7 +6,7 @@ import pickle
 import requests
 import numpy as np
 import pdfplumber
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Dict
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 
@@ -41,16 +41,25 @@ class PDFProcessor:
             for keyword in ["date", "issue", "page"]
         )
 
-    def extract_text_from_pdf(self, pdf_path: str) -> Optional[str]:
+    def extract_text_from_pdf(self, pdf_path: str) -> Optional[List[Dict]]:
+        """
+        Extracts text from the PDF page by page.
+        Returns a list of dictionaries with keys:
+          - doc_name: the name of the document (PDF file basename)
+          - page: the page number (1-indexed)
+          - raw_text: the unprocessed text from the page
+          - processed_text: the cleaned-up text from the page
+        """
         if not os.path.exists(pdf_path):
             print(f"PDF file not found: {pdf_path}")
             return None
 
+        pages = []
         raw_text_list = []
         processed_text_list = []
 
         with pdfplumber.open(pdf_path) as pdf:
-            for page in pdf.pages:
+            for i, page in enumerate(pdf.pages, start=1):
                 text = page.extract_text()
                 if text:
                     raw_text_list.append(text)
@@ -65,15 +74,22 @@ class PDFProcessor:
                             processed_lines.append(cleaned_line)
                     processed_text = "\n".join(processed_lines)
                     processed_text_list.append(processed_text)
+                    pages.append({
+                        "doc_name": os.path.basename(pdf_path),
+                        "page": i,
+                        "raw_text": text,
+                        "processed_text": processed_text,
+                    })
 
         pdf_filename = os.path.basename(pdf_path)
-        # Save raw text
+        print(pdf_filename)
+        # Save raw text (joined with double newlines)
         with open(
             os.path.join(self.output_dir, f"text_raw_{pdf_filename}.txt"),
             "w",
             encoding="utf-8",
         ) as raw_file:
-            raw_file.write("\n".join(raw_text_list))
+            raw_file.write("\n\n".join(raw_text_list))
         # Save processed text
         with open(
             os.path.join(self.output_dir, f"text_processed_{
@@ -81,30 +97,54 @@ class PDFProcessor:
             "w",
             encoding="utf-8",
         ) as processed_file:
-            processed_file.write("\n".join(processed_text_list))
+            processed_file.write("\n\n".join(processed_text_list))
 
-        return "\n".join(processed_text_list)
+        return pages
 
-    def chunk_text(self, text: str, chunk_size: int = 100) -> List[str]:
-        # Split text into sentences
-        sentences = re.split(r"(?<!\w\.\w)(?<=\. )", text)
+    def chunk_pages(self, pages: List[Dict], chunk_size: int = 100, mode: str = "page") -> List[Dict]:
+        """
+        Chunks each page's processed text according to the selected mode.
+
+        Currently supports:
+          - "page": each page is treated as a single chunk.
+          - "character": splits the text into chunks of fixed character length.
+
+        Returns a list of dictionaries with keys:
+          - doc_name: document name (basename)
+          - page: page number from which the chunk came
+          - chunk_text: the text for the chunk
+        """
         chunks = []
-        current_chunk = []
+        for page in pages:
+            doc_name = page["doc_name"]
+            page_num = page["page"]
+            text = page["processed_text"]
 
-        for sentence in sentences:
-            current_chunk.append(sentence)
-            if len(" ".join(current_chunk).split()) >= chunk_size:
-                if not current_chunk[-1].endswith("."):
-                    current_chunk.pop()
-                chunks.append(" ".join(current_chunk))
-                current_chunk = []
-
-        if current_chunk:
-            chunks.append(" ".join(current_chunk))
-
-        print(f"Total chunks: {len(chunks)}")
+            if mode == "page":
+                # Each page becomes one chunk.
+                chunks.append({
+                    "doc_name": doc_name,
+                    "page": page_num,
+                    "chunk_text": text,
+                })
+            elif mode == "character":
+                # Chunk by fixed number of characters.
+                for i in range(0, len(text), chunk_size):
+                    chunk_text = text[i: i + chunk_size]
+                    chunks.append({
+                        "doc_name": doc_name,
+                        "page": page_num,
+                        "chunk_text": chunk_text,
+                    })
+            else:
+                # Fallback: treat each page as a single chunk.
+                chunks.append({
+                    "doc_name": doc_name,
+                    "page": page_num,
+                    "chunk_text": text,
+                })
+        print(f"Total chunks created: {len(chunks)}")
         return chunks
-
 
 # =============================================================================
 # Embedding Management
@@ -122,17 +162,15 @@ class EmbeddingManager:
         self.chunk_texts_file = os.path.join(
             self.output_dir, "chunk_texts.pkl")
 
-    def load_embeddings(
-        self,
-    ) -> Tuple[List[np.ndarray], List[Tuple[str, int]], List[str]]:
+    def load_embeddings(self) -> Tuple[List[np.ndarray], List[Tuple[str, int]], List[str]]:
         if (
             os.path.exists(self.embeddings_file)
             and os.path.exists(self.chunk_mapping_file)
             and os.path.exists(self.chunk_texts_file)
         ):
-            with open(self.embeddings_file, "rb") as emb_file, open(
-                self.chunk_mapping_file, "rb"
-            ) as map_file, open(self.chunk_texts_file, "rb") as text_file:
+            with open(self.embeddings_file, "rb") as emb_file, \
+                    open(self.chunk_mapping_file, "rb") as map_file, \
+                    open(self.chunk_texts_file, "rb") as text_file:
                 embeddings = pickle.load(emb_file)
                 chunk_to_doc_map = pickle.load(map_file)
                 chunk_texts = pickle.load(text_file)
@@ -145,17 +183,21 @@ class EmbeddingManager:
         chunk_to_doc_map: List[Tuple[str, int]],
         chunk_texts: List[str],
     ) -> None:
-        with open(self.embeddings_file, "wb") as emb_file, open(
-            self.chunk_mapping_file, "wb"
-        ) as map_file, open(self.chunk_texts_file, "wb") as text_file:
+        with open(self.embeddings_file, "wb") as emb_file, \
+                open(self.chunk_mapping_file, "wb") as map_file, \
+                open(self.chunk_texts_file, "wb") as text_file:
             pickle.dump(embeddings, emb_file)
             pickle.dump(chunk_to_doc_map, map_file)
             pickle.dump(chunk_texts, text_file)
         print("Embeddings saved successfully.")
 
     def embed_documents(
-        self, pdf_files: List[str], folder_path: str,
-        pdf_processor: PDFProcessor
+        self,
+        pdf_files: List[str],
+        folder_path: str,
+        pdf_processor: PDFProcessor,
+        chunk_mode: str = "page",  # using "page" mode here
+        chunk_size: int = 100
     ) -> Tuple[List[np.ndarray], List[Tuple[str, int]], List[str]]:
         all_chunks_text = []
         all_chunks_embeddings = []
@@ -165,20 +207,20 @@ class EmbeddingManager:
             pdf_path = os.path.join(folder_path, pdf_file)
             print(f"Processing document: {pdf_file}")
 
-            text = pdf_processor.extract_text_from_pdf(pdf_path)
-            if not text:
+            pages = pdf_processor.extract_text_from_pdf(pdf_path)
+            if not pages:
                 print(f"No text extracted from the PDF: {pdf_path}")
                 continue
 
-            chunks = pdf_processor.chunk_text(text)
-            all_chunks_text.extend(chunks)
-
-            chunk_embeddings = self.model.encode(chunks)
-            all_chunks_embeddings.extend(chunk_embeddings)
-
+            # Create chunks from the pages using the desired mode.
+            chunks = pdf_processor.chunk_pages(
+                pages, chunk_size=chunk_size, mode=chunk_mode)
+            chunk_texts = [chunk["chunk_text"] for chunk in chunks]
+            all_chunks_text.extend(chunk_texts)
             chunk_to_doc_map.extend(
-                [(pdf_path, i) for i in range(len(chunk_embeddings))]
-            )
+                [(chunk["doc_name"], chunk["page"]) for chunk in chunks])
+            chunk_embeddings = self.model.encode(chunk_texts)
+            all_chunks_embeddings.extend(chunk_embeddings)
 
         self.save_embeddings(all_chunks_embeddings,
                              chunk_to_doc_map, all_chunks_text)
@@ -192,20 +234,18 @@ class EmbeddingManager:
             if not os.path.isdir(folder_path):
                 print(f"The specified folder does not exist: {folder_path}")
                 return None, None, None
-            pdf_files = [
-                f for f in os.listdir(folder_path) if f.lower().endswith(".pdf")
-            ]
+            pdf_files = [f for f in os.listdir(
+                folder_path) if f.lower().endswith(".pdf")]
             if not pdf_files:
                 print("No PDF files found in the folder.")
                 return None, None, None
 
             print("Embedding documents with Sentence-BERT model...")
             document_embeddings, chunk_to_doc_map, chunk_texts = self.embed_documents(
-                pdf_files, folder_path, pdf_processor
+                pdf_files, folder_path, pdf_processor, chunk_mode="page", chunk_size=100
             )
 
         return document_embeddings, chunk_to_doc_map, chunk_texts
-
 
 # =============================================================================
 # Ollama API Client
@@ -237,7 +277,6 @@ class OllamaClient:
             print(f"Ollama API error: {response.status_code}")
             return None
 
-
 # =============================================================================
 # Response Exporter
 # =============================================================================
@@ -253,6 +292,7 @@ class ResponseExporter:
             writer.writerow(
                 [
                     "Document",
+                    "Page",
                     "Chunk Number",
                     "Cosine Similarity",
                     "Cosine Rank",
@@ -274,22 +314,14 @@ class ResponseExporter:
         filename: str = "output/model_responses.txt",
     ) -> None:
         with open(filename, "w", encoding="utf-8") as f:
-            for (
-                query_text,
-                model_used,
-                response_text,
-                response_similarity,
-            ) in all_responses:
+            for (query_text, model_used, response_text, response_similarity) in all_responses:
                 f.write("Query: " + query_text + "\n")
                 f.write("Model: " + model_used + "\n")
-                f.write(
-                    f"Cosine similarity between query and response: {
-                        response_similarity:.4f}\n"
-                )
+                f.write(f"Cosine similarity between query and response: {
+                        response_similarity:.4f}\n")
                 f.write("Response:\n" + response_text + "\n")
                 f.write("-" * 40 + "\n")
-        print(f"\nAll responses exported to '{filename}'.")
-
+        print(f"\nAll responses exported to '{filename}'")
 
 # =============================================================================
 # Query Processing
@@ -315,23 +347,19 @@ class QueryProcessor:
         document_embeddings: List[np.ndarray],
         chunk_to_doc_map: List[Tuple[str, int]],
         chunk_texts: List[str],
-        top_n: int = 5,
-        similarity_threshold: float = 0.4,
+        top_n: int = 10,
+        similarity_threshold: float = 0.5,
     ) -> str:
         print("Computing cosine similarities between query and document embeddings...")
         similarities = cosine_similarity(
             query_embedding, document_embeddings).flatten()
 
-        selected_indices = [
-            idx for idx, sim in enumerate(similarities) if sim > similarity_threshold
-        ]
+        selected_indices = [idx for idx, sim in enumerate(
+            similarities) if sim > similarity_threshold]
         if len(selected_indices) < top_n:
             remaining_indices = sorted(
-                (
-                    idx
-                    for idx in range(len(similarities))
-                    if idx not in selected_indices
-                ),
+                (idx for idx in range(len(similarities))
+                 if idx not in selected_indices),
                 key=lambda idx: similarities[idx],
                 reverse=True,
             )
@@ -339,46 +367,41 @@ class QueryProcessor:
                 remaining_indices[: top_n - len(selected_indices)])
         selected_indices.sort()
 
+        # Build relevant texts string including document name and page number.
         relevant_texts = "\n\n".join(
-            f"From document, {os.path.basename(chunk_to_doc_map[idx][0])}:\n{
+            f"From document '{chunk_to_doc_map[idx][0]}' (Page {chunk_to_doc_map[idx][1]}):\n{
                 chunk_texts[idx]}"
             for idx in selected_indices
         )
 
+        # Save the most relevant texts to a file.
+        ResponseExporter.save_text_to_file(
+            relevant_texts, "output/relevant_texts.txt")
+
         # Create similarity results and export to CSV.
         rank_map = {
             idx: rank + 1
-            for rank, idx in enumerate(
-                sorted(
-                    range(len(similarities)),
-                    key=lambda i: similarities[i],
-                    reverse=True,
-                )
-            )
+            for rank, idx in enumerate(sorted(range(len(similarities)), key=lambda i: similarities[i], reverse=True))
         }
         selection_map = {idx: "Yes" for idx in selected_indices}
         similarity_results = []
         for idx, sim in enumerate(similarities):
-            doc_path, chunk_num = chunk_to_doc_map[idx]
+            doc_name, page_num = chunk_to_doc_map[idx]
             cosine_rank = rank_map.get(idx)
             picked = selection_map.get(idx, "No")
             similarity_results.append(
-                [doc_path, chunk_num, sim, cosine_rank, picked])
+                [doc_name, page_num, idx, sim, cosine_rank, picked])
 
         ResponseExporter.save_similarities_to_csv(similarity_results)
 
         print("\n--- Query Summary ---")
-        print(
-            f"Condition for selection: Chunks with cosine similarity > {
-                similarity_threshold}, or top {top_n} chunks if fewer than {top_n} exceed the threshold"
-        )
+        print(f"Condition for selection: Chunks with cosine similarity > {
+              similarity_threshold}, or top {top_n} chunks if fewer than {top_n} exceed the threshold")
         for item in similarity_results:
-            doc_path, chunk_num, sim, rank, picked = item
+            doc_name, page_num, chunk_num, sim, rank, picked = item
             if picked == "Yes":
-                print(
-                    f"Chunk {chunk_num} from '{doc_path}' with Rank {
-                        rank} (Cosine Similarity: {sim:.4f})"
-                )
+                print(f"Chunk {chunk_num} from '{doc_name}' (Page {page_num}) with Rank {
+                      rank} (Cosine Similarity: {sim:.4f})")
         print("\nMost relevant documents:")
         relevant_documents = {
             chunk_to_doc_map[idx][0] for idx in selected_indices}
@@ -400,14 +423,10 @@ class QueryProcessor:
             response = self.ollama_client.query(model_name, prompt)
             if response:
                 response_embedding = self.model.encode([response])
-                response_similarity = float(
-                    cosine_similarity(
-                        query_embedding, response_embedding).flatten()[0]
-                )
-                print(
-                    f"Cosine similarity between query and response: {
-                        response_similarity:.4f}"
-                )
+                response_similarity = float(cosine_similarity(
+                    query_embedding, response_embedding).flatten()[0])
+                print(f"Cosine similarity between query and response: {
+                      response_similarity:.4f}")
                 print("Response:\n", response)
             else:
                 print("No response generated for the query.")
@@ -430,31 +449,21 @@ class QueryProcessor:
 
         # Concatenate all model responses and re-query the best model.
         response_texts = "\n".join([x[2] for x in all_responses])
-        prompt = (
-            f"Relevant text:\n{response_texts}\n\n" f"Question: {
-                query}\n\n" "Answer:"
-        )
+        prompt = f"Relevant text:\n{
+            response_texts}\n\nQuestion: {query}\n\nAnswer:"
         ResponseExporter.save_text_to_file(
-            prompt, os.path.join("output", "super_prompt.txt")
-        )
+            prompt, os.path.join("output", "super_prompt.txt"))
         response = self.ollama_client.query(best_model, prompt)
 
         print(f"\nBest model response:\n{response}")
 
-        best_model_similarity = float(
-            cosine_similarity(query_embedding, self.model.encode([response])).flatten()[
-                0
-            ]
-        )
-        print(
-            f"Cosine similarity between query and best model response: {
-                best_model_similarity:.4f}"
-        )
+        best_model_similarity = float(cosine_similarity(
+            query_embedding, self.model.encode([response])).flatten()[0])
+        print(f"Cosine similarity between query and best model response: {
+              best_model_similarity:.4f}")
         all_responses.append(
-            (query, best_model + "_super", response, best_model_similarity)
-        )
+            (query, best_model + "_super", response, best_model_similarity))
         return all_responses
-
 
 # =============================================================================
 # Main Application (API-Friendly)
@@ -477,8 +486,7 @@ class DocumentQueryApp:
         ]
         self.pdf_processor = PDFProcessor(output_dir=self.output_dir)
         self.embedding_manager = EmbeddingManager(
-            self.model, output_dir=self.output_dir
-        )
+            self.model, output_dir=self.output_dir)
         self.ollama_client = OllamaClient()
         self.query_processor = QueryProcessor(
             self.model,
@@ -495,46 +503,47 @@ class DocumentQueryApp:
             selected_models = [m.strip()
                                for m in model.split(",") if m.strip()]
         else:
-            selected_models = (
-                model if model else [self.query_processor.available_models[0]]
-            )
+            selected_models = model if model else [
+                self.query_processor.available_models[0]]
 
-        # Build the full query text from inputs
-        full_query = (
-            f"In the context of {additional_context}, {
-                query}"
-            if additional_context
-            else query
+        extra_context = (
+            ". Structure the response as follows, a concise summary, "
+            "followed by bulleted key takeaways, followed by key document references. "
+            "Where possible list the relevant document sections and page numbers."
         )
 
-        # Get the query embedding
+        # Build the full query text from inputs.
+        full_query = (
+            f"In the context of {additional_context}, {query} {extra_context}"
+            if additional_context
+            else f"{query} {extra_context}"
+        )
+
+        # Get the query embedding.
         query_embedding = self.model.encode([full_query])
 
-        # Gather or update embeddings
-        document_embeddings, chunk_to_doc_map, chunk_texts = (
-            self.embedding_manager.gather_embeddings(
-                self.docs_folder, self.pdf_processor
-            )
+        # Gather or update embeddings.
+        document_embeddings, chunk_to_doc_map, chunk_texts = self.embedding_manager.gather_embeddings(
+            self.docs_folder, self.pdf_processor
         )
         if document_embeddings is None:
             return {"error": "No document embeddings available."}
 
-        # Compute similarities and build the prompt
+        # Compute similarities and build the prompt.
         relevant_texts = self.query_processor.compute_similarities(
             query_embedding, document_embeddings, chunk_to_doc_map, chunk_texts
         )
         prompt = f"Relevant text:\n{
-            relevant_texts}\n\nQuestion: {query}\n\nAnswer:"
+            relevant_texts}\n\nQuestion: {full_query}\n\nAnswer:"
 
-        # Query selected models
+        # Query selected models.
         all_responses = self.query_processor.query_models(
-            prompt, query, query_embedding, selected_models
-        )
+            prompt, full_query, query_embedding, selected_models)
 
-        # Optionally, run the super query to combine responses
+        # Optionally, run the super query to combine responses.
         # all_responses = self.query_processor.run_super_query(query, query_embedding, all_responses)
 
-        # Export and return the responses
+        # Export and return the responses.
         ResponseExporter.export_responses(all_responses)
 
         return {"query": query, "responses": all_responses}
